@@ -1,0 +1,10 @@
+flask
+sqlalchemy
+pandas
+python-dotenv
+openai
+langchain
+langchain_community
+streamlit
+beautifulsoup4
+requests 
