@@ -371,15 +371,12 @@ def parse_bin_file(bin_file_path):
         # 강의계획서 데이터 구조화
         syllabus_data = {
             "기본정보": {},
-            "교수정보": {},
-            "강의정보": {},
             "평가방법": {},
-            "교재정보": {},
             "핵심역량": {}
         }
         
-        # 현재 섹션 추적
         current_section = "기본정보"
+        current_key = None
         
         # 모든 텍스트 아이템 찾기
         for item in root.findall('.//Item'):
@@ -389,27 +386,25 @@ def parse_bin_file(bin_file_path):
                     text = text_elem.text.strip()
                     
                     # 섹션 구분
-                    if "교수정보" in text:
-                        current_section = "교수정보"
-                    elif "강의정보" in text:
-                        current_section = "강의정보"
-                    elif "평가방법" in text:
-                        current_section = "평가방법"
-                    elif "교재정보" in text:
-                        current_section = "교재정보"
-                    elif "핵심역량" in text:
-                        current_section = "핵심역량"
+                    if text in ["교수정보", "강의정보", "평가방법", "교재정보", "핵심역량"]:
+                        current_section = text
+                        continue
                     
                     # 데이터 저장
-                    if text and not any(section in text for section in ["교수정보", "강의정보", "평가방법", "교재정보", "핵심역량"]):
+                    if text:
                         if ":" in text:
                             key, value = text.split(":", 1)
-                            syllabus_data[current_section][key.strip()] = value.strip()
-                        else:
-                            syllabus_data[current_section][f"항목_{len(syllabus_data[current_section])}"] = text
-        
-        # 빈 섹션 제거
-        syllabus_data = {k: v for k, v in syllabus_data.items() if v}
+                            key = key.strip()
+                            value = value.strip()
+                            if key and value:  # 키와 값이 모두 있는 경우만 저장
+                                syllabus_data[current_section][key] = value
+                            elif key:  # 키만 있는 경우 다음 값이 나올 때까지 대기
+                                current_key = key
+                        elif current_key:  # 이전에 저장된 키가 있는 경우
+                            syllabus_data[current_section][current_key] = text
+                            current_key = None
+                        else:  # 키도 값도 없는 경우
+                            syllabus_data[current_section][text] = ""
         
         return syllabus_data
                 

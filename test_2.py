@@ -359,55 +359,130 @@ def parse_bin_file(bin_file_path):
     try:
         with open(bin_file_path, 'rb') as f:
             content = f.read()
-            
-        # XML 파싱
         root = ET.fromstring(content)
-        
-        # 강의계획서 데이터 구조화
+
         syllabus_data = {
             "기본정보": {},
-            "교수정보": {},
-            "강의정보": {},
             "평가방법": {},
-            "교재정보": {},
             "핵심역량": {}
         }
-        
-        # 현재 섹션 추적
         current_section = "기본정보"
-        
-        # 모든 텍스트 아이템 찾기
+
+        # 1. 모든 Item을 (y, x, text) 튜플로 추출
+        items = []
         for item in root.findall('.//Item'):
             if 'classname' in item.attrib and item.attrib['classname'] == 'UbiTextItem':
                 text_elem = item.find('.//Text')
                 if text_elem is not None and text_elem.text:
                     text = text_elem.text.strip()
-                    
-                    # 섹션 구분
-                    if "교수정보" in text:
-                        current_section = "교수정보"
-                    elif "강의정보" in text:
-                        current_section = "강의정보"
-                    elif "평가방법" in text:
-                        current_section = "평가방법"
-                    elif "교재정보" in text:
-                        current_section = "교재정보"
-                    elif "핵심역량" in text:
-                        current_section = "핵심역량"
-                    
-                    # 데이터 저장
-                    if text and not any(section in text for section in ["교수정보", "강의정보", "평가방법", "교재정보", "핵심역량"]):
-                        if ":" in text:
-                            key, value = text.split(":", 1)
-                            syllabus_data[current_section][key.strip()] = value.strip()
-                        else:
-                            syllabus_data[current_section][f"항목_{len(syllabus_data[current_section])}"] = text
-        
-        # 빈 섹션 제거
-        syllabus_data = {k: v for k, v in syllabus_data.items() if v}
-        
+                    x = int(item.attrib.get('x', 0))
+                    y = int(item.attrib.get('y', 0))
+                    items.append((y, x, text))
+
+        # 2. y값(행) 기준으로 그룹핑 (오차 허용)
+        from collections import defaultdict
+        row_dict = defaultdict(list)
+        y_threshold = 3  # y좌표가 3px 이내면 같은 행으로 간주
+        sorted_items = sorted(items)
+        prev_y = None
+        group_y = None
+        for y, x, text in sorted_items:
+            if prev_y is None or abs(y - prev_y) > y_threshold:
+                group_y = y
+            row_dict[group_y].append((x, text))
+            prev_y = y
+
+        # 3. 각 행을 x값 오름차순으로 정렬 후 섹션별로 저장
+        rows_by_y = [sorted(row) for row in row_dict.values()]
+        section_rows = []
+        for row in rows_by_y:
+            texts = [text for x, text in row]
+            section_rows.append(texts)
+
+        def is_percent(val):
+            return bool(re.match(r'^[0-9]+%$', val.strip()))
+        def is_all_percent(row):
+            return all(is_percent(cell) for cell in row if cell.strip())
+        def is_all_korean(row):
+            return all(re.match(r'^[가-힣/()]+$', cell.strip()) for cell in row if cell.strip())
+
+        i = 0
+        prev_row = None
+        while i < len(section_rows):
+            row = section_rows[i]
+            # 섹션 구분
+            if any(s in row for s in ["교수정보", "강의정보", "평가방법", "교재정보", "핵심역량"]):
+                for s in ["교수정보", "강의정보", "평가방법", "교재정보", "핵심역량"]:
+                    if s in row:
+                        current_section = s
+                        break
+                # '평가방법' 표 구조 매핑 (한 행에 key-value 번갈아 있음)
+                if current_section == "평가방법":
+                    for j in range(0, len(row)-1, 2):
+                        key = row[j]
+                        value = row[j+1]
+                        if key != "평가방법":
+                            syllabus_data[current_section][key] = value
+                    i += 1
+                    prev_row = row
+                    continue
+            # '기본정보' 섹션에서 평가계획 표가 들어온 경우 분리 (다양한 케이스 처리)
+            if current_section == "기본정보":
+                if any("평가계획" in cell for cell in row):
+                    # 다음 행이 존재하고, 현재 행이 항목명, 다음 행이 %면 zip 매핑
+                    if i+1 < len(section_rows) and is_all_korean(row) and is_all_percent(section_rows[i+1]):
+                        keys = row
+                        values = section_rows[i+1]
+                        min_len = min(len(keys), len(values))
+                        for k, v in zip(keys[:min_len], values[:min_len]):
+                            if "평가계획" not in k:
+                                syllabus_data["평가방법"][k] = v
+                        i += 2
+                        prev_row = row
+                        continue
+                    # 한 행에 key-value 번갈아 있으면 짝수/홀수 매핑
+                    elif any(is_percent(cell) for cell in row) and any(re.match(r'^[가-힣/()]+$', cell.strip()) for cell in row):
+                        for j in range(0, len(row)-1, 2):
+                            k, v = row[j], row[j+1]
+                            if is_percent(v):
+                                syllabus_data["평가방법"][k] = v
+                        i += 1
+                        prev_row = row
+                        continue
+                    # 한 행에 값만 있으면 이전 행과 zip 매핑
+                    elif is_all_percent(row) and prev_row and is_all_korean(prev_row):
+                        keys = prev_row
+                        values = row
+                        min_len = min(len(keys), len(values))
+                        for k, v in zip(keys[:min_len], values[:min_len]):
+                            if "평가계획" not in k:
+                                syllabus_data["평가방법"][k] = v
+                        i += 1
+                        prev_row = row
+                        continue
+            # 일반 key-value 매핑 (2개씩)
+            j = 0
+            while j + 1 < len(row):
+                key = row[j]
+                value = row[j+1]
+                if key not in ["교수정보", "강의정보", "평가방법", "교재정보", "핵심역량"] and not (current_section == "기본정보" and "평가계획" in key):
+                    syllabus_data[current_section][key] = value
+                j += 2
+            prev_row = row
+            i += 1
+
+        # 세로형 평가계획 표 우선 처리 (보정)
+        for row in rows_by_y:
+            row = sorted(row)  # x값 기준 정렬
+            if len(row) > 3 and '평가계획' in row[0][1]:
+                for j in range(1, len(row)-1, 2):
+                    key = row[j][1]
+                    value = row[j+1][1]
+                    syllabus_data['평가방법'][key] = value
+            elif len(row) > 1 and '평가참고사항' in row[0][1]:
+                syllabus_data['평가방법']['평가참고사항'] = row[1][1]
+
         return syllabus_data
-                
     except Exception as e:
         print(f"파일 파싱 중 오류 발생: {e}")
         import traceback

@@ -89,12 +89,40 @@ def process_json_files(json_dir):
                 print(f"담당교수: {basic_info.get('항목_9', '')}")
                 print(f"이수구분: {basic_info.get('항목_5', '')}")
                 
+                # 담당교수 정보 추출 로직 개선
+                def extract_professor_info(info_dict):
+                    # 교수 정보가 포함될 수 있는 모든 항목 확인
+                    professor_fields = {
+                        "항목_9": "담당교수",
+                        "항목_10": "담당교수",
+                        "항목_4": "이메일",  # 이메일이 교수 정보와 함께 있을 수 있음
+                        "항목_6": "연구실",  # 연구실 정보가 교수 정보와 함께 있을 수 있음
+                    }
+                    
+                    # 각 항목에서 교수 정보 추출 시도
+                    for field, field_type in professor_fields.items():
+                        value = info_dict.get(field, "")
+                        if value and "교수" in value or "교수" in field_type:
+                            # 교수 정보에서 이름만 추출
+                            parts = value.split()
+                            for part in parts:
+                                if "교수" in part:
+                                    # 교수 앞의 이름 추출
+                                    idx = part.find("교수")
+                                    if idx > 0:
+                                        return part[:idx]
+                                    return part
+                            return value
+                    return ""
+
+                professor = extract_professor_info(basic_info)
+                
                 # 강의 정보 생성
                 course = Course(
                     subject_code=basic_info.get("항목_13", ""),  # 교과목 코드
                     subject_name=basic_info.get("항목_18", ""),  # 교과목명
                     class_number=basic_info.get("항목_11", ""),  # 분반
-                    professor=basic_info.get("항목_9", ""),  # 담당교수
+                    professor=professor,  # 개선된 담당교수 정보
                     college=basic_info.get("항목_1", "").split()[0] if basic_info.get("항목_1") else "",  # 단과대학
                     major=basic_info.get("항목_20", "").split()[0] if basic_info.get("항목_20") else "",  # 학과
                     course_type=basic_info.get("항목_5", ""),  # 이수구분

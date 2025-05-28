@@ -90,6 +90,11 @@ template = """당신은 대학교 강의 추천 시스템입니다. 주어진 �
 8. 강의 내용이 질문의 주제와 직접적으로 관련이 있는지 확인해주세요.
 9. 모르는 정보에 대해서는 추측하지 말고, 있는 정보만 바탕으로 답변해주세요.
 10. 수업 목표를 바탕으로 해당 강의가 질문자의 요구에 얼마나 부합하는지 설명해주세요.
+11. 각 강의의 장단점을 분석하여 학생이 선택할 때 고려해야 할 사항을 제시해주세요.
+12. 강의의 난이도와 선수과목 요구사항을 확인하여 적절한 학생 수준을 제안해주세요.
+13. 강의의 실용성과 취업/진로 연계성을 분석해주세요.
+14. 강의의 특별한 특징이나 장점을 강조해주세요.
+15. 학생의 관심사나 목표와 강의의 연관성을 구체적으로 설명해주세요.
 
 답변:"""
 
@@ -106,14 +111,17 @@ try:
         retriever=vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={
-                "k": 10,  # 검색 결과 수 증가
-                "score_threshold": 0.7,  # 유사도 임계값 설정
-                "filter": None  # 필요한 경우 필터 추가
+                "k": 15,  # 검색 결과 수 증가
+                "score_threshold": 0.6,  # 유사도 임계값 조정
+                "filter": None
             }
         ),
         memory=memory,
         return_source_documents=True,
-        combine_docs_chain_kwargs={"prompt": QA_PROMPT}
+        combine_docs_chain_kwargs={
+            "prompt": QA_PROMPT,
+            "document_variable_name": "context"
+        }
     )
     logger.info("RAG 체인 설정 완료")
 except Exception as e:
@@ -129,7 +137,7 @@ class Query(BaseModel):
 async def recommend_courses(query: Query):
     try:
         # 유사한 강의 검색
-        similar_courses = query_similar_courses(query.question, n_results=5)
+        similar_courses = query_similar_courses(query.question, n_results=10)  # 검색 결과 수 증가
         
         if not similar_courses:
             return {
@@ -142,7 +150,7 @@ async def recommend_courses(query: Query):
         
         # LLM을 사용하여 답변 생성
         llm = ChatOpenAI(
-            model_name="gpt-3.5-turbo",
+            model_name="gpt-3.5-turbo-16k",  # 더 긴 컨텍스트를 처리할 수 있는 모델 사용
             temperature=0.7,
             openai_api_key=OPENAI_API_KEY
         )
